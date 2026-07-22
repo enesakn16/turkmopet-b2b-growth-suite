@@ -1,16 +1,16 @@
 # Türkmopet B2B Growth Suite
 
-Türkmopet'in toptan satış müşterilerini daha düzenli değerlendirmek, segmentlere ayırmak ve büyüme fırsatlarını ölçmek için geliştirilen açık kaynak araç seti.
-
-İlk sürüm; aylık sipariş hacmi, aktif müşteri süresi, ödeme gecikmesi, iade oranı ve vergi levhası doğrulamasına göre deterministik ve test edilebilir bir B2B müşteri puanı üretir.
+Türkmopet'in toptan satış müşterilerini düzenli değerlendirmek, segmentlere ayırmak ve satış ekibine uygulanabilir aksiyonlar üretmek için geliştirilen açık kaynak araç seti.
 
 ## Özellikler
 
 - 0–100 arası açıklanabilir müşteri puanı
 - `starter`, `growth` ve `pro` segmentleri
-- Ödeme ve iade riski için negatif puanlar
-- Her puanın nedenlerini döndüren `ScoreBreakdown`
-- Toplu müşteri sıralama desteği
+- Ödeme gecikmesi ve yüksek iade oranı için risk sinyalleri
+- Vergi levhası doğrulama kontrolü
+- CSV müşteri listesi içe aktarma
+- Excel uyumlu UTF-8 BOM raporu üretme
+- Her müşteri için deterministik satış aksiyonu önerisi
 - Python 3.11, 3.12 ve 3.13 için otomatik CI
 
 ## Kurulum
@@ -19,7 +19,38 @@ Türkmopet'in toptan satış müşterilerini daha düzenli değerlendirmek, segm
 python -m pip install -e .
 ```
 
-## Kullanım
+## Komut satırı kullanımı
+
+Girdi CSV'si şu kolonları içermelidir:
+
+```csv
+account_id,monthly_order_value,active_months,payment_delay_days,return_rate,has_tax_certificate
+B2B-001,35000,6,20,0.20,true
+B2B-002,120000,18,0,0.01,evet
+```
+
+Rapor üretmek için:
+
+```bash
+b2b-score --input accounts.csv --output reports/scored-accounts.csv
+```
+
+Çıktı kolonları:
+
+```text
+account_id,score,tier,recommended_action,reasons
+```
+
+Örnek aksiyonlar:
+
+- `review-payment-risk`
+- `review-return-pattern`
+- `offer-key-account-plan`
+- `schedule-growth-call`
+- `request-tax-certificate`
+- `nurture-account`
+
+## Python API kullanımı
 
 ```python
 from turkmopet_b2b import WholesaleAccount, score_account
@@ -43,30 +74,43 @@ print(result.reasons)
 
 ```bash
 python -m unittest discover -s tests -v
+python -m compileall -q src tests
 ```
 
 ## Mimari
 
 ```text
-WholesaleAccount
-      ↓
-validation
-      ↓
+CSV
+ ↓
+load_accounts
+ ↓
+WholesaleAccount validation
+ ↓
 score_account
-      ↓
-ScoreBreakdown(total, tier, reasons)
+ ↓
+AccountReport + recommended action
+ ↓
+Excel uyumlu CSV
 ```
 
-Puanlama çekirdeği dış servislere bağlı değildir. Böylece aynı kurallar CLI, FastAPI veya yönetim paneli içinde tekrar kullanılabilir.
+Puanlama ve aksiyon üretimi dış servislere bağlı değildir. Aynı çekirdek ileride CLI, FastAPI veya yönetim paneli içinde tekrar kullanılabilir.
+
+## Tasarım kararları
+
+- Puanlama kuralları deterministiktir; aynı veri aynı sonucu üretir.
+- Her hesap `account_id` ile tekil olmak zorundadır.
+- Hatalı satırlar sessizce atlanmaz; satır numarasıyla açık hata üretilir.
+- `payment-risk`, diğer büyüme aksiyonlarından önce gelir.
+- Çıktı dosyası Türkçe Excel kurulumlarında sorunsuz açılması için UTF-8 BOM ile yazılır.
 
 ## Yol haritası
 
-- Segment bazlı aksiyon önerileri
-- CSV içe aktarma ve raporlama
 - FastAPI servis katmanı
 - Basit yönetim paneli
-- Gerçek sipariş verileriyle kalibrasyon
+- Gerçek sipariş verileriyle eşik kalibrasyonu
+- Müşteri geçmişine göre zaman serisi analizi
+- CRM entegrasyonu
 
 ## AI destekli geliştirme
 
-Kod tabanı yapay zekâ destekli geliştirilebilir; ancak puanlama kararları deterministik, açıklanabilir ve testlerle doğrulanabilir kalmalıdır. Bu model otomatik kredi kararı vermek için değil, satış ekibine önceliklendirme sinyali üretmek için tasarlanmıştır.
+Kod tabanı yapay zekâ destekli geliştirilebilir; ancak puanlama ve aksiyon kararları deterministik, açıklanabilir ve testlerle doğrulanabilir kalmalıdır. Bu araç otomatik kredi kararı vermek için değil, satış ekibine önceliklendirme sinyali üretmek için tasarlanmıştır.
