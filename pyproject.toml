@@ -1,0 +1,17 @@
+[build-system]
+requires = ["setuptools>=75"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "turkmopet-b2b-growth-suite"
+version = "0.1.0"
+description = "Deterministic B2B account scoring primitives for wholesale growth workflows."
+requires-python = ">=3.11"
+license = { text = "MIT" }
+authors = [{ name = "Enes Akin" }]
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
