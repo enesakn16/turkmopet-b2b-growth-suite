@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import csv
+import os
+import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable
@@ -79,22 +81,41 @@ def build_reports(accounts: Iterable[tuple[str, WholesaleAccount]]) -> list[Acco
 def write_reports(path: str | Path, reports: Iterable[AccountReport]) -> None:
     target = Path(path)
     target.parent.mkdir(parents=True, exist_ok=True)
-    with target.open("w", encoding="utf-8-sig", newline="") as handle:
-        writer = csv.DictWriter(
-            handle,
-            fieldnames=["account_id", "score", "tier", "recommended_action", "reasons"],
-        )
-        writer.writeheader()
-        for report in reports:
-            writer.writerow(
-                {
-                    "account_id": report.account_id,
-                    "score": report.score,
-                    "tier": report.tier.value,
-                    "recommended_action": report.recommended_action,
-                    "reasons": "|".join(report.reasons),
-                }
+    temporary_path: Path | None = None
+
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="w",
+            encoding="utf-8-sig",
+            newline="",
+            dir=target.parent,
+            prefix=f".{target.name}.",
+            suffix=".tmp",
+            delete=False,
+        ) as handle:
+            temporary_path = Path(handle.name)
+            writer = csv.DictWriter(
+                handle,
+                fieldnames=["account_id", "score", "tier", "recommended_action", "reasons"],
             )
+            writer.writeheader()
+            for report in reports:
+                writer.writerow(
+                    {
+                        "account_id": report.account_id,
+                        "score": report.score,
+                        "tier": report.tier.value,
+                        "recommended_action": report.recommended_action,
+                        "reasons": "|".join(report.reasons),
+                    }
+                )
+            handle.flush()
+            os.fsync(handle.fileno())
+
+        os.replace(temporary_path, target)
+    finally:
+        if temporary_path is not None and temporary_path.exists():
+            temporary_path.unlink()
 
 
 def _to_report(account_id: str, result: ScoreBreakdown) -> AccountReport:
