@@ -10,6 +10,7 @@ Türkmopet'in toptan satış müşterilerini düzenli değerlendirmek, segmentle
 - Vergi levhası doğrulama kontrolü
 - CSV müşteri listesi içe aktarma
 - Excel uyumlu UTF-8 BOM raporu üretme
+- Atomik rapor yayınıyla yarım veya bozuk CSV riskini engelleme
 - Her müşteri için deterministik satış aksiyonu önerisi
 - Python 3.11, 3.12 ve 3.13 için otomatik CI
 
@@ -34,6 +35,8 @@ Rapor üretmek için:
 ```bash
 b2b-score --input accounts.csv --output reports/scored-accounts.csv
 ```
+
+Rapor önce hedef klasörde geçici bir dosyaya yazılır, diske aktarılır ve ardından tek hamlede hedef dosyanın yerine geçirilir. Yazma başarısız olursa mevcut güvenilir rapor korunur ve geçici dosya temizlenir.
 
 Çıktı kolonları:
 
@@ -90,7 +93,11 @@ score_account
  ↓
 AccountReport + recommended action
  ↓
-Excel uyumlu CSV
+Geçici CSV + fsync
+ ↓
+Atomik os.replace
+ ↓
+Excel uyumlu rapor
 ```
 
 Puanlama ve aksiyon üretimi dış servislere bağlı değildir. Aynı çekirdek ileride CLI, FastAPI veya yönetim paneli içinde tekrar kullanılabilir.
@@ -102,6 +109,7 @@ Puanlama ve aksiyon üretimi dış servislere bağlı değildir. Aynı çekirdek
 - Hatalı satırlar sessizce atlanmaz; satır numarasıyla açık hata üretilir.
 - `payment-risk`, diğer büyüme aksiyonlarından önce gelir.
 - Çıktı dosyası Türkçe Excel kurulumlarında sorunsuz açılması için UTF-8 BOM ile yazılır.
+- Raporlar doğrudan hedef dosyaya yazılmaz; başarılı tamamlanan geçici dosya atomik olarak yayımlanır.
 
 ## Yol haritası
 
