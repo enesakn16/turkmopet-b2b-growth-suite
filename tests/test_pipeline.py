@@ -2,8 +2,10 @@ import csv
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
-from turkmopet_b2b.pipeline import build_reports, load_accounts, write_reports
+from turkmopet_b2b import AccountTier
+from turkmopet_b2b.pipeline import AccountReport, build_reports, load_accounts, write_reports
 
 
 class AccountPipelineTests(unittest.TestCase):
@@ -30,6 +32,44 @@ class AccountPipelineTests(unittest.TestCase):
                 rows = list(csv.DictReader(handle))
             self.assertEqual(rows[0]["tier"], "pro")
             self.assertEqual(rows[1]["recommended_action"], "review-payment-risk")
+            self.assertEqual(list(output.parent.glob(f".{output.name}.*.tmp")), [])
+
+    def test_existing_report_is_replaced_completely(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory) / "scored.csv"
+            output.write_text("stale,partial,data\n", encoding="utf-8")
+            report = AccountReport(
+                account_id="B2B-001",
+                score=80,
+                tier=AccountTier.PRO,
+                recommended_action="offer-key-account-plan",
+                reasons=("verified-business", "high-volume"),
+            )
+
+            write_reports(output, [report])
+
+            content = output.read_text(encoding="utf-8-sig")
+            self.assertNotIn("stale,partial,data", content)
+            self.assertIn("B2B-001,80,pro,offer-key-account-plan", content)
+
+    def test_failed_replace_preserves_existing_report_and_cleans_temp_file(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory) / "scored.csv"
+            output.write_text("trusted-report\n", encoding="utf-8")
+            report = AccountReport(
+                account_id="B2B-001",
+                score=80,
+                tier=AccountTier.PRO,
+                recommended_action="offer-key-account-plan",
+                reasons=("verified-business",),
+            )
+
+            with mock.patch("turkmopet_b2b.pipeline.os.replace", side_effect=OSError("disk failure")):
+                with self.assertRaisesRegex(OSError, "disk failure"):
+                    write_reports(output, [report])
+
+            self.assertEqual(output.read_text(encoding="utf-8"), "trusted-report\n")
+            self.assertEqual(list(output.parent.glob(f".{output.name}.*.tmp")), [])
 
     def test_duplicate_account_id_is_rejected(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
