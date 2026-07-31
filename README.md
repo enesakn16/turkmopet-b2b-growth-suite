@@ -11,6 +11,8 @@ Türkmopet'in toptan satış müşterilerini düzenli değerlendirmek, segmentle
 - CSV müşteri listesi içe aktarma
 - Excel uyumlu UTF-8 BOM raporu üretme
 - Atomik rapor yayınıyla yarım veya bozuk CSV riskini engelleme
+- Önceki ve güncel skor raporlarını karşılaştıran müşteri trend analizi
+- Düşen, kaybolan, yükselen, yeni ve sabit müşterileri risk önceliğine göre sıralama
 - Her müşteri için deterministik satış aksiyonu önerisi
 - Python 3.11, 3.12 ve 3.13 için otomatik CI
 
@@ -20,7 +22,7 @@ Türkmopet'in toptan satış müşterilerini düzenli değerlendirmek, segmentle
 python -m pip install -e .
 ```
 
-## Komut satırı kullanımı
+## Skor raporu üretme
 
 Girdi CSV'si şu kolonları içermelidir:
 
@@ -52,6 +54,33 @@ account_id,score,tier,recommended_action,reasons
 - `schedule-growth-call`
 - `request-tax-certificate`
 - `nurture-account`
+
+## Skor değişim analizi
+
+İki farklı dönemde üretilmiş skor raporlarını karşılaştırmak için:
+
+```bash
+b2b-trend \
+  --previous reports/2026-06-scored.csv \
+  --current reports/2026-07-scored.csv \
+  --output reports/2026-07-trends.csv
+```
+
+Trend raporu şu kolonları içerir:
+
+```text
+account_id,previous_score,current_score,score_delta,previous_tier,current_tier,movement
+```
+
+`movement` değerleri:
+
+- `declined`: Skoru düşen müşteri
+- `missing`: Önceki raporda olup güncel raporda bulunmayan müşteri
+- `improved`: Skoru yükselen müşteri
+- `new`: Güncel rapora ilk kez giren müşteri
+- `stable`: Skoru değişmeyen müşteri
+
+Rapor risk önceliğine göre sıralanır: önce skoru düşenler, sonra kaybolanlar, yükselenler, yeni müşteriler ve sabit kalanlar. Aynı şekilde atomik olarak yayımlanır; yarım CSV bırakılmaz.
 
 ## Python API kullanımı
 
@@ -97,10 +126,14 @@ Geçici CSV + fsync
  ↓
 Atomik os.replace
  ↓
-Excel uyumlu rapor
+Excel uyumlu skor raporu
+ ↓
+Önceki dönem raporuyla compare_score_snapshots
+ ↓
+Risk öncelikli trend raporu
 ```
 
-Puanlama ve aksiyon üretimi dış servislere bağlı değildir. Aynı çekirdek ileride CLI, FastAPI veya yönetim paneli içinde tekrar kullanılabilir.
+Puanlama ve trend analizi dış servislere bağlı değildir. Aynı çekirdek ileride CLI, FastAPI veya yönetim paneli içinde tekrar kullanılabilir.
 
 ## Tasarım kararları
 
@@ -108,7 +141,8 @@ Puanlama ve aksiyon üretimi dış servislere bağlı değildir. Aynı çekirdek
 - Her hesap `account_id` ile tekil olmak zorundadır.
 - Hatalı satırlar sessizce atlanmaz; satır numarasıyla açık hata üretilir.
 - `payment-risk`, diğer büyüme aksiyonlarından önce gelir.
-- Çıktı dosyası Türkçe Excel kurulumlarında sorunsuz açılması için UTF-8 BOM ile yazılır.
+- Skor düşüşleri ve güncel rapordan kaybolan müşteriler trend raporunda önce gösterilir.
+- Çıktı dosyaları Türkçe Excel kurulumlarında sorunsuz açılması için UTF-8 BOM ile yazılır.
 - Raporlar doğrudan hedef dosyaya yazılmaz; başarılı tamamlanan geçici dosya atomik olarak yayımlanır.
 
 ## Yol haritası
@@ -116,7 +150,6 @@ Puanlama ve aksiyon üretimi dış servislere bağlı değildir. Aynı çekirdek
 - FastAPI servis katmanı
 - Basit yönetim paneli
 - Gerçek sipariş verileriyle eşik kalibrasyonu
-- Müşteri geçmişine göre zaman serisi analizi
 - CRM entegrasyonu
 
 ## AI destekli geliştirme
