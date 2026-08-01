@@ -13,6 +13,7 @@ Türkmopet'in toptan satış müşterilerini düzenli değerlendirmek, segmentle
 - Atomik rapor yayınıyla yarım veya bozuk CSV riskini engelleme
 - Önceki ve güncel skor raporlarını karşılaştıran müşteri trend analizi
 - Düşen, kaybolan, yükselen, yeni ve sabit müşterileri risk önceliğine göre sıralama
+- Trend analiziyle aynı çalışmada öncelikli satış görevleri üretme
 - Her müşteri için deterministik satış aksiyonu önerisi
 - Python 3.11, 3.12 ve 3.13 için otomatik CI
 
@@ -55,21 +56,30 @@ account_id,score,tier,recommended_action,reasons
 - `request-tax-certificate`
 - `nurture-account`
 
-## Skor değişim analizi
+## Skor değişim analizi ve satış görevleri
 
-İki farklı dönemde üretilmiş skor raporlarını karşılaştırmak için:
+İki farklı dönemde üretilmiş skor raporlarını karşılaştırıp aynı çalışmada satış görevleri oluşturmak için:
 
 ```bash
 b2b-trend \
   --previous reports/2026-06-scored.csv \
   --current reports/2026-07-scored.csv \
-  --output reports/2026-07-trends.csv
+  --output reports/2026-07-trends.csv \
+  --actions-output reports/2026-07-actions.csv
 ```
+
+`--actions-output` isteğe bağlıdır. Parametre verilmezse önceki kullanım bozulmadan yalnızca trend raporu üretilir.
 
 Trend raporu şu kolonları içerir:
 
 ```text
 account_id,previous_score,current_score,score_delta,previous_tier,current_tier,movement
+```
+
+Satış görevi raporu şu kolonları içerir:
+
+```text
+account_id,priority,action_type,recommended_action,reason
 ```
 
 `movement` değerleri:
@@ -80,7 +90,7 @@ account_id,previous_score,current_score,score_delta,previous_tier,current_tier,m
 - `new`: Güncel rapora ilk kez giren müşteri
 - `stable`: Skoru değişmeyen müşteri
 
-Rapor risk önceliğine göre sıralanır: önce skoru düşenler, sonra kaybolanlar, yükselenler, yeni müşteriler ve sabit kalanlar. Aynı şekilde atomik olarak yayımlanır; yarım CSV bırakılmaz.
+Rapor risk önceliğine göre sıralanır: önce skoru düşenler, sonra kaybolanlar, yükselenler, yeni müşteriler ve sabit kalanlar. Trend ve satış görevi dosyaları atomik olarak yayımlanır; yarım CSV bırakılmaz.
 
 ## Python API kullanımı
 
@@ -131,6 +141,10 @@ Excel uyumlu skor raporu
 Önceki dönem raporuyla compare_score_snapshots
  ↓
 Risk öncelikli trend raporu
+ ↓
+build_sales_actions
+ ↓
+Öncelikli satış görevleri CSV'si
 ```
 
 Puanlama ve trend analizi dış servislere bağlı değildir. Aynı çekirdek ileride CLI, FastAPI veya yönetim paneli içinde tekrar kullanılabilir.
@@ -142,6 +156,7 @@ Puanlama ve trend analizi dış servislere bağlı değildir. Aynı çekirdek il
 - Hatalı satırlar sessizce atlanmaz; satır numarasıyla açık hata üretilir.
 - `payment-risk`, diğer büyüme aksiyonlarından önce gelir.
 - Skor düşüşleri ve güncel rapordan kaybolan müşteriler trend raporunda önce gösterilir.
+- Stabil müşteriler için gereksiz satış görevi üretilmez.
 - Çıktı dosyaları Türkçe Excel kurulumlarında sorunsuz açılması için UTF-8 BOM ile yazılır.
 - Raporlar doğrudan hedef dosyaya yazılmaz; başarılı tamamlanan geçici dosya atomik olarak yayımlanır.
 
