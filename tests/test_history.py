@@ -76,6 +76,59 @@ class ScoreHistoryTests(unittest.TestCase):
             self.assertEqual(result, 0)
             self.assertTrue(output.exists())
 
+    def test_cli_can_generate_trends_and_prioritized_actions_in_one_run(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            previous = root / "previous.csv"
+            current = root / "current.csv"
+            trends_output = root / "reports" / "trend.csv"
+            actions_output = root / "reports" / "actions.csv"
+            previous.write_text(
+                "account_id,score,tier\nA,80,pro\nB,50,growth\nC,40,starter\n",
+                encoding="utf-8",
+            )
+            current.write_text(
+                "account_id,score,tier\nA,60,growth\nC,40,starter\nD,55,growth\n",
+                encoding="utf-8",
+            )
+
+            result = main(
+                [
+                    "--previous",
+                    str(previous),
+                    "--current",
+                    str(current),
+                    "--output",
+                    str(trends_output),
+                    "--actions-output",
+                    str(actions_output),
+                ]
+            )
+
+            self.assertEqual(result, 0)
+            self.assertTrue(trends_output.exists())
+            with actions_output.open("r", encoding="utf-8-sig", newline="") as handle:
+                actions = list(csv.DictReader(handle))
+            self.assertEqual([row["account_id"] for row in actions], ["A", "B", "D"])
+            self.assertEqual([row["action_type"] for row in actions], ["win_back", "inactive_check", "onboarding"])
+            self.assertEqual([row["priority"] for row in actions], ["1", "1", "3"])
+            self.assertEqual(list(actions_output.parent.glob(f".{actions_output.name}.*.tmp")), [])
+
+    def test_cli_keeps_actions_output_optional_for_backward_compatibility(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            previous = root / "previous.csv"
+            current = root / "current.csv"
+            output = root / "trend.csv"
+            previous.write_text("account_id,score,tier\nA,80,pro\n", encoding="utf-8")
+            current.write_text("account_id,score,tier\nA,70,growth\n", encoding="utf-8")
+
+            result = main(["--previous", str(previous), "--current", str(current), "--output", str(output)])
+
+            self.assertEqual(result, 0)
+            self.assertTrue(output.exists())
+            self.assertFalse((root / "actions.csv").exists())
+
 
 if __name__ == "__main__":
     unittest.main()
