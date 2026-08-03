@@ -8,6 +8,8 @@ from typing import Iterable
 
 from .actions import SalesAction
 
+TASK_STATUSES = ("OPEN", "IN_PROGRESS", "RESOLVED")
+
 
 @dataclass(frozen=True, slots=True)
 class TaskSyncResult:
@@ -15,12 +17,27 @@ class TaskSyncResult:
     refreshed: int
 
 
+@dataclass(frozen=True, slots=True)
+class SalesTask:
+    task_key: str
+    account_id: str
+    priority: int
+    action_type: str
+    recommended_action: str
+    reason: str
+    status: str
+    assignee: str
+    resolution_note: str
+    created_at: str
+    updated_at: str
+
+
 def sync_sales_tasks(database: str | Path, actions: Iterable[SalesAction]) -> TaskSyncResult:
     path = Path(database)
     path.parent.mkdir(parents=True, exist_ok=True)
     created = 0
     refreshed = 0
-    now = datetime.now(UTC).isoformat()
+    now = _now()
 
     with sqlite3.connect(path) as connection:
         connection.execute("PRAGMA foreign_keys = ON")
@@ -71,6 +88,116 @@ def sync_sales_tasks(database: str | Path, actions: Iterable[SalesAction]) -> Ta
         connection.commit()
 
     return TaskSyncResult(created=created, refreshed=refreshed)
+
+
+def list_sales_tasks(
+    database: str | Path,
+    *,
+    status: str | None = None,
+    assignee: str | None = None,
+) -> list[SalesTask]:
+    normalized_status = _normalize_status(status) if status is not None else None
+    clauses: list[str] = []
+    parameters: list[str] = []
+    if normalized_status is not None:
+        clauses.append("status = ?")
+        parameters.append(normalized_status)
+    if assignee is not None:
+        clauses.append("assignee = ?")
+        parameters.append(assignee.strip())
+
+    query = "SELECT * FROM sales_tasks"
+    if clauses:
+        query += " WHERE " + " AND ".join(clauses)
+    query += " ORDER BY status != 'OPEN', priority, account_id, action_type"
+
+    with _connect_existing(database) as connection:
+        rows = connection.execute(query, parameters).fetchall()
+    return [SalesTask(*row) for row in rows]
+
+
+def assign_sales_task(database: str | Path, task_key: str, assignee: str) -> SalesTask:
+    normalized_assignee = assignee.strip()
+    if not normalized_assignee:
+        raise ValueError("assignee cannot be empty")
+    return _update_task(
+        database,
+        task_key,
+        "assignee = ?, updated_at = ?",
+        (normalized_assignee, _now()),
+    )
+
+
+def start_sales_task(database: str | Path, task_key: str) -> SalesTask:
+    with _connect_existing(database) as connection:
+        current = _fetch_task(connection, task_key)
+        if current.status == "RESOLVED":
+            raise ValueError(f"resolved task cannot be started: {task_key}")
+        connection.execute(
+            "UPDATE sales_tasks SET status = 'IN_PROGRESS', updated_at = ? WHERE task_key = ?",
+            (_now(), task_key),
+        )
+        connection.commit()
+        return _fetch_task(connection, task_key)
+
+
+def resolve_sales_task(database: str | Path, task_key: str, resolution_note: str) -> SalesTask:
+    note = resolution_note.strip()
+    if not note:
+        raise ValueError("resolution note cannot be empty")
+    return _update_task(
+        database,
+        task_key,
+        "status = 'RESOLVED', resolution_note = ?, updated_at = ?",
+        (note, _now()),
+    )
+
+
+def _update_task(
+    database: str | Path,
+    task_key: str,
+    assignment_sql: str,
+    parameters: tuple[str, ...],
+) -> SalesTask:
+    with _connect_existing(database) as connection:
+        _fetch_task(connection, task_key)
+        connection.execute(
+            f"UPDATE sales_tasks SET {assignment_sql} WHERE task_key = ?",
+            (*parameters, task_key),
+        )
+        connection.commit()
+        return _fetch_task(connection, task_key)
+
+
+def _connect_existing(database: str | Path) -> sqlite3.Connection:
+    path = Path(database)
+    if not path.is_file():
+        raise ValueError(f"task database does not exist: {path}")
+    connection = sqlite3.connect(path)
+    connection.execute("PRAGMA foreign_keys = ON")
+    _ensure_schema(connection)
+    return connection
+
+
+def _fetch_task(connection: sqlite3.Connection, task_key: str) -> SalesTask:
+    row = connection.execute(
+        "SELECT * FROM sales_tasks WHERE task_key = ?",
+        (task_key,),
+    ).fetchone()
+    if row is None:
+        raise ValueError(f"sales task not found: {task_key}")
+    return SalesTask(*row)
+
+
+def _normalize_status(status: str) -> str:
+    normalized = status.strip().upper()
+    if normalized not in TASK_STATUSES:
+        raise ValueError(f"invalid task status: {status}")
+    return normalized
+
+
+def _now() -> str:
+    return datetime.now(UTC).isoformat()
 
 
 def _ensure_schema(connection: sqlite3.Connection) -> None:
