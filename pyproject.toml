@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "turkmopet-b2b-growth-suite"
-version = "0.3.0"
+version = "0.4.0"
 description = "Deterministic B2B account scoring primitives for wholesale growth workflows."
 requires-python = ">=3.11"
 license = { text = "MIT" }
