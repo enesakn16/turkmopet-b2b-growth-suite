@@ -55,6 +55,44 @@ class SalesTaskCliTests(unittest.TestCase):
             ).fetchone()
         self.assertEqual(row, ("RESOLVED", "enes", "Müşteriyle görüşüldü"))
 
+    def test_reopen_resolved_task_and_preserve_audit_history(self) -> None:
+        main(
+            [
+                "--database",
+                str(self.database),
+                "resolve",
+                "B2B-001:win_back",
+                "--note",
+                "İlk görüşme tamamlandı",
+            ]
+        )
+
+        result = main(
+            [
+                "--database",
+                str(self.database),
+                "reopen",
+                "B2B-001:win_back",
+                "--reason",
+                "Yeni sipariş döneminde risk tekrarlandı",
+            ]
+        )
+
+        self.assertEqual(result, 0)
+        with sqlite3.connect(self.database) as connection:
+            task = connection.execute(
+                "SELECT status, resolution_note FROM sales_tasks WHERE task_key = ?",
+                ("B2B-001:win_back",),
+            ).fetchone()
+            event = connection.execute(
+                "SELECT event_type, note FROM sales_task_events WHERE task_key = ?",
+                ("B2B-001:win_back",),
+            ).fetchone()
+        self.assertEqual(task, ("OPEN", ""))
+        self.assertEqual(event[0], "REOPENED")
+        self.assertIn("İlk görüşme tamamlandı", event[1])
+        self.assertIn("Yeni sipariş döneminde risk tekrarlandı", event[1])
+
     def test_resolve_requires_non_empty_note(self) -> None:
         stderr = io.StringIO()
         with contextlib.redirect_stderr(stderr):
@@ -70,6 +108,32 @@ class SalesTaskCliTests(unittest.TestCase):
             )
         self.assertEqual(result, 2)
         self.assertIn("resolution note cannot be empty", stderr.getvalue())
+
+    def test_reopen_requires_non_empty_reason(self) -> None:
+        main(
+            [
+                "--database",
+                str(self.database),
+                "resolve",
+                "B2B-001:win_back",
+                "--note",
+                "Tamamlandı",
+            ]
+        )
+        stderr = io.StringIO()
+        with contextlib.redirect_stderr(stderr):
+            result = main(
+                [
+                    "--database",
+                    str(self.database),
+                    "reopen",
+                    "B2B-001:win_back",
+                    "--reason",
+                    "   ",
+                ]
+            )
+        self.assertEqual(result, 2)
+        self.assertIn("reopen reason cannot be empty", stderr.getvalue())
 
     def test_resolved_task_cannot_be_started_again(self) -> None:
         main(
