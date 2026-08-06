@@ -4,7 +4,12 @@ import unittest
 from pathlib import Path
 
 from turkmopet_b2b.actions import SalesAction
-from turkmopet_b2b.tasks import sync_sales_tasks
+from turkmopet_b2b.tasks import (
+    list_task_events,
+    reopen_sales_task,
+    resolve_sales_task,
+    sync_sales_tasks,
+)
 
 
 class SalesTaskTests(unittest.TestCase):
@@ -69,6 +74,46 @@ class SalesTaskTests(unittest.TestCase):
             with sqlite3.connect(database) as connection:
                 count = connection.execute("SELECT COUNT(*) FROM sales_tasks").fetchone()[0]
             self.assertEqual(count, 2)
+
+    def test_reopen_preserves_previous_resolution_in_audit_event(self) -> None:
+        action = SalesAction("B2B-001", 1, "win_back", "Ara", "Skor düştü")
+        with tempfile.TemporaryDirectory() as directory:
+            database = Path(directory) / "sales.db"
+            sync_sales_tasks(database, [action])
+            resolve_sales_task(database, "B2B-001:win_back", "Müşteri ödeme sözü verdi")
+
+            reopened = reopen_sales_task(
+                database,
+                "B2B-001:win_back",
+                "Yeni dönemde skor tekrar düştü",
+            )
+
+            self.assertEqual(reopened.status, "OPEN")
+            self.assertEqual(reopened.resolution_note, "")
+            events = list_task_events(database, "B2B-001:win_back")
+            self.assertEqual(len(events), 1)
+            self.assertEqual(events[0].event_type, "REOPENED")
+            self.assertIn("Müşteri ödeme sözü verdi", events[0].note)
+            self.assertIn("Yeni dönemde skor tekrar düştü", events[0].note)
+
+    def test_reopen_rejects_non_resolved_task(self) -> None:
+        action = SalesAction("B2B-001", 1, "win_back", "Ara", "Skor düştü")
+        with tempfile.TemporaryDirectory() as directory:
+            database = Path(directory) / "sales.db"
+            sync_sales_tasks(database, [action])
+
+            with self.assertRaisesRegex(ValueError, "only resolved tasks can be reopened"):
+                reopen_sales_task(database, "B2B-001:win_back", "Yanlışlıkla")
+
+    def test_reopen_requires_reason(self) -> None:
+        action = SalesAction("B2B-001", 1, "win_back", "Ara", "Skor düştü")
+        with tempfile.TemporaryDirectory() as directory:
+            database = Path(directory) / "sales.db"
+            sync_sales_tasks(database, [action])
+            resolve_sales_task(database, "B2B-001:win_back", "Tamamlandı")
+
+            with self.assertRaisesRegex(ValueError, "reopen reason cannot be empty"):
+                reopen_sales_task(database, "B2B-001:win_back", "   ")
 
 
 if __name__ == "__main__":
