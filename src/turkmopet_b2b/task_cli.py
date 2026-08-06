@@ -9,6 +9,7 @@ from .tasks import (
     TASK_STATUSES,
     assign_sales_task,
     list_sales_tasks,
+    reopen_sales_task,
     resolve_sales_task,
     start_sales_task,
 )
@@ -34,6 +35,13 @@ def build_parser() -> argparse.ArgumentParser:
     resolve_parser = subparsers.add_parser("resolve", help="Resolve a task with a mandatory note")
     resolve_parser.add_argument("task_key")
     resolve_parser.add_argument("--note", required=True)
+
+    reopen_parser = subparsers.add_parser(
+        "reopen",
+        help="Reopen a resolved task while preserving its previous resolution in the audit log",
+    )
+    reopen_parser.add_argument("task_key")
+    reopen_parser.add_argument("--reason", required=True)
     return parser
 
 
@@ -59,8 +67,13 @@ def main(argv: list[str] | None = None) -> int:
             print(f"started {task.task_key}")
             return 0
 
-        task = resolve_sales_task(args.database, args.task_key, args.note)
-        print(f"resolved {task.task_key}")
+        if args.command == "resolve":
+            task = resolve_sales_task(args.database, args.task_key, args.note)
+            print(f"resolved {task.task_key}")
+            return 0
+
+        task = reopen_sales_task(args.database, args.task_key, args.reason)
+        print(f"reopened {task.task_key}")
         return 0
     except (OSError, ValueError) as exc:
         print(f"error: {exc}", file=sys.stderr)
