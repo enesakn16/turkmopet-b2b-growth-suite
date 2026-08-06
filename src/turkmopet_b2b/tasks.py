@@ -32,6 +32,15 @@ class SalesTask:
     updated_at: str
 
 
+@dataclass(frozen=True, slots=True)
+class TaskEvent:
+    event_id: int
+    task_key: str
+    event_type: str
+    note: str
+    created_at: str
+
+
 def sync_sales_tasks(database: str | Path, actions: Iterable[SalesAction]) -> TaskSyncResult:
     path = Path(database)
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -116,6 +125,21 @@ def list_sales_tasks(
     return [SalesTask(*row) for row in rows]
 
 
+def list_task_events(database: str | Path, task_key: str) -> list[TaskEvent]:
+    with _connect_existing(database) as connection:
+        _fetch_task(connection, task_key)
+        rows = connection.execute(
+            """
+            SELECT event_id, task_key, event_type, note, created_at
+            FROM sales_task_events
+            WHERE task_key = ?
+            ORDER BY event_id
+            """,
+            (task_key,),
+        ).fetchall()
+    return [TaskEvent(*row) for row in rows]
+
+
 def assign_sales_task(database: str | Path, task_key: str, assignee: str) -> SalesTask:
     normalized_assignee = assignee.strip()
     if not normalized_assignee:
@@ -151,6 +175,37 @@ def resolve_sales_task(database: str | Path, task_key: str, resolution_note: str
         "status = 'RESOLVED', resolution_note = ?, updated_at = ?",
         (note, _now()),
     )
+
+
+def reopen_sales_task(database: str | Path, task_key: str, reason: str) -> SalesTask:
+    normalized_reason = reason.strip()
+    if not normalized_reason:
+        raise ValueError("reopen reason cannot be empty")
+
+    with _connect_existing(database) as connection:
+        current = _fetch_task(connection, task_key)
+        if current.status != "RESOLVED":
+            raise ValueError(f"only resolved tasks can be reopened: {task_key}")
+
+        now = _now()
+        audit_note = f"previous resolution: {current.resolution_note}\nreopen reason: {normalized_reason}"
+        connection.execute(
+            """
+            INSERT INTO sales_task_events (task_key, event_type, note, created_at)
+            VALUES (?, 'REOPENED', ?, ?)
+            """,
+            (task_key, audit_note, now),
+        )
+        connection.execute(
+            """
+            UPDATE sales_tasks
+            SET status = 'OPEN', resolution_note = '', updated_at = ?
+            WHERE task_key = ?
+            """,
+            (now, task_key),
+        )
+        connection.commit()
+        return _fetch_task(connection, task_key)
 
 
 def _update_task(
@@ -220,5 +275,20 @@ def _ensure_schema(connection: sqlite3.Connection) -> None:
         """
     )
     connection.execute(
+        """
+        CREATE TABLE IF NOT EXISTS sales_task_events (
+            event_id INTEGER PRIMARY KEY AUTOINCREMENT,
+            task_key TEXT NOT NULL,
+            event_type TEXT NOT NULL CHECK (event_type IN ('REOPENED')),
+            note TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            FOREIGN KEY (task_key) REFERENCES sales_tasks(task_key) ON DELETE CASCADE
+        )
+        """
+    )
+    connection.execute(
         "CREATE INDEX IF NOT EXISTS idx_sales_tasks_queue ON sales_tasks(status, priority, account_id)"
+    )
+    connection.execute(
+        "CREATE INDEX IF NOT EXISTS idx_sales_task_events_task ON sales_task_events(task_key, event_id)"
     )
