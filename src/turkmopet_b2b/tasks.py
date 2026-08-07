@@ -38,6 +38,8 @@ class TaskEvent:
     task_key: str
     event_type: str
     note: str
+    previous_resolution: str
+    reopen_reason: str
     created_at: str
 
 
@@ -130,7 +132,8 @@ def list_task_events(database: str | Path, task_key: str) -> list[TaskEvent]:
         _fetch_task(connection, task_key)
         rows = connection.execute(
             """
-            SELECT event_id, task_key, event_type, note, created_at
+            SELECT event_id, task_key, event_type, note,
+                   previous_resolution, reopen_reason, created_at
             FROM sales_task_events
             WHERE task_key = ?
             ORDER BY event_id
@@ -191,10 +194,11 @@ def reopen_sales_task(database: str | Path, task_key: str, reason: str) -> Sales
         audit_note = f"previous resolution: {current.resolution_note}\nreopen reason: {normalized_reason}"
         connection.execute(
             """
-            INSERT INTO sales_task_events (task_key, event_type, note, created_at)
-            VALUES (?, 'REOPENED', ?, ?)
+            INSERT INTO sales_task_events (
+                task_key, event_type, note, previous_resolution, reopen_reason, created_at
+            ) VALUES (?, 'REOPENED', ?, ?, ?, ?)
             """,
-            (task_key, audit_note, now),
+            (task_key, audit_note, current.resolution_note, normalized_reason, now),
         )
         connection.execute(
             """
@@ -281,14 +285,32 @@ def _ensure_schema(connection: sqlite3.Connection) -> None:
             task_key TEXT NOT NULL,
             event_type TEXT NOT NULL CHECK (event_type IN ('REOPENED')),
             note TEXT NOT NULL,
+            previous_resolution TEXT NOT NULL DEFAULT '',
+            reopen_reason TEXT NOT NULL DEFAULT '',
             created_at TEXT NOT NULL,
             FOREIGN KEY (task_key) REFERENCES sales_tasks(task_key) ON DELETE CASCADE
         )
         """
     )
+    _ensure_event_columns(connection)
     connection.execute(
         "CREATE INDEX IF NOT EXISTS idx_sales_tasks_queue ON sales_tasks(status, priority, account_id)"
     )
     connection.execute(
         "CREATE INDEX IF NOT EXISTS idx_sales_task_events_task ON sales_task_events(task_key, event_id)"
     )
+
+
+def _ensure_event_columns(connection: sqlite3.Connection) -> None:
+    columns = {
+        row[1]
+        for row in connection.execute("PRAGMA table_info(sales_task_events)").fetchall()
+    }
+    if "previous_resolution" not in columns:
+        connection.execute(
+            "ALTER TABLE sales_task_events ADD COLUMN previous_resolution TEXT NOT NULL DEFAULT ''"
+        )
+    if "reopen_reason" not in columns:
+        connection.execute(
+            "ALTER TABLE sales_task_events ADD COLUMN reopen_reason TEXT NOT NULL DEFAULT ''"
+        )
