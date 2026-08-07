@@ -75,7 +75,7 @@ class SalesTaskTests(unittest.TestCase):
                 count = connection.execute("SELECT COUNT(*) FROM sales_tasks").fetchone()[0]
             self.assertEqual(count, 2)
 
-    def test_reopen_preserves_previous_resolution_in_audit_event(self) -> None:
+    def test_reopen_preserves_previous_resolution_in_structured_audit_event(self) -> None:
         action = SalesAction("B2B-001", 1, "win_back", "Ara", "Skor düştü")
         with tempfile.TemporaryDirectory() as directory:
             database = Path(directory) / "sales.db"
@@ -93,8 +93,43 @@ class SalesTaskTests(unittest.TestCase):
             events = list_task_events(database, "B2B-001:win_back")
             self.assertEqual(len(events), 1)
             self.assertEqual(events[0].event_type, "REOPENED")
-            self.assertIn("Müşteri ödeme sözü verdi", events[0].note)
-            self.assertIn("Yeni dönemde skor tekrar düştü", events[0].note)
+            self.assertEqual(events[0].previous_resolution, "Müşteri ödeme sözü verdi")
+            self.assertEqual(events[0].reopen_reason, "Yeni dönemde skor tekrar düştü")
+            self.assertIn(events[0].previous_resolution, events[0].note)
+            self.assertIn(events[0].reopen_reason, events[0].note)
+
+    def test_existing_event_table_is_migrated_without_losing_rows(self) -> None:
+        action = SalesAction("B2B-001", 1, "win_back", "Ara", "Skor düştü")
+        with tempfile.TemporaryDirectory() as directory:
+            database = Path(directory) / "sales.db"
+            sync_sales_tasks(database, [action])
+            with sqlite3.connect(database) as connection:
+                connection.execute("DROP TABLE sales_task_events")
+                connection.execute(
+                    """
+                    CREATE TABLE sales_task_events (
+                        event_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        task_key TEXT NOT NULL,
+                        event_type TEXT NOT NULL,
+                        note TEXT NOT NULL,
+                        created_at TEXT NOT NULL
+                    )
+                    """
+                )
+                connection.execute(
+                    """
+                    INSERT INTO sales_task_events (task_key, event_type, note, created_at)
+                    VALUES ('B2B-001:win_back', 'REOPENED', 'legacy event', '2026-08-01T00:00:00+00:00')
+                    """
+                )
+                connection.commit()
+
+            events = list_task_events(database, "B2B-001:win_back")
+
+            self.assertEqual(len(events), 1)
+            self.assertEqual(events[0].note, "legacy event")
+            self.assertEqual(events[0].previous_resolution, "")
+            self.assertEqual(events[0].reopen_reason, "")
 
     def test_reopen_rejects_non_resolved_task(self) -> None:
         action = SalesAction("B2B-001", 1, "win_back", "Ara", "Skor düştü")
