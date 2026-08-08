@@ -24,7 +24,28 @@ Açık veya devam eden bir görevi yeniden açma girişimi kontrollü hata üret
 
 Mevcut SQLite veritabanlarında eski `sales_task_events` tablosu varsa yeni yapısal alanlar uygulama açılışında güvenli biçimde eklenir. Var olan denetim satırları silinmez veya yeniden yazılmaz; eski kayıtların yeni alanları boş kalır.
 
-Denetim kayıtları Python API üzerinden okunabilir:
+## Denetim geçmişini görüntüleme ve dışa aktarma
+
+Bir görevin yeniden açılma geçmişi doğrudan CLI üzerinden okunabilir:
+
+```bash
+b2b-task \
+  --database data/b2b-sales-tasks.db \
+  audit B2B-001:win_back
+```
+
+Excel uyumlu UTF-8 BOM CSV çıktısı için:
+
+```bash
+b2b-task \
+  --database data/b2b-sales-tasks.db \
+  audit B2B-001:win_back \
+  --output reports/B2B-001-win-back-audit.csv
+```
+
+CSV şu alanları ayrı sütunlarda taşır: `event_id`, `task_key`, `event_type`, `note`, `previous_resolution`, `reopen_reason`, `created_at`. Böylece operasyon veya raporlama tarafında birleşik `note` metnini ayrıştırmaya gerek kalmaz.
+
+Denetim kayıtları Python API üzerinden de okunabilir:
 
 ```python
 from turkmopet_b2b.tasks import list_task_events
@@ -38,7 +59,5 @@ for event in events:
         event.created_at,
     )
 ```
-
-Bu sayede rapor veya operasyon ekranları metin ayrıştırmak zorunda kalmadan önceki çözümü ve yeniden açma gerekçesini ayrı alanlar olarak kullanabilir.
 
 Bu akış otomatik olarak görev açmaz veya müşteri durumunu değiştirmez. Satış ekibinin bilinçli kararı gerekir.
