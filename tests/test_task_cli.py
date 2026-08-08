@@ -93,6 +93,48 @@ class SalesTaskCliTests(unittest.TestCase):
         self.assertIn("İlk görüşme tamamlandı", event[1])
         self.assertIn("Yeni sipariş döneminde risk tekrarlandı", event[1])
 
+    def test_audit_exports_structured_reopen_history(self) -> None:
+        main(
+            [
+                "--database",
+                str(self.database),
+                "resolve",
+                "B2B-001:win_back",
+                "--note",
+                "İlk görüşme tamamlandı",
+            ]
+        )
+        main(
+            [
+                "--database",
+                str(self.database),
+                "reopen",
+                "B2B-001:win_back",
+                "--reason",
+                "Risk tekrarlandı",
+            ]
+        )
+        output = Path(self.directory.name) / "audit.csv"
+
+        result = main(
+            [
+                "--database",
+                str(self.database),
+                "audit",
+                "B2B-001:win_back",
+                "--output",
+                str(output),
+            ]
+        )
+
+        self.assertEqual(result, 0)
+        self.assertTrue(output.read_bytes().startswith(b"\xef\xbb\xbf"))
+        content = output.read_text(encoding="utf-8-sig")
+        self.assertIn("previous_resolution", content)
+        self.assertIn("reopen_reason", content)
+        self.assertIn("İlk görüşme tamamlandı", content)
+        self.assertIn("Risk tekrarlandı", content)
+
     def test_resolve_requires_non_empty_note(self) -> None:
         stderr = io.StringIO()
         with contextlib.redirect_stderr(stderr):
