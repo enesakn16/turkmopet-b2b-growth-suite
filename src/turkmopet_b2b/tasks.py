@@ -174,17 +174,21 @@ def resolve_sales_task(database: str | Path, task_key: str, resolution_note: str
         raise ValueError("resolution note cannot be empty")
 
     with _connect_existing(database) as connection:
-        current = _fetch_task(connection, task_key)
-        if current.status == "RESOLVED":
-            raise ValueError(f"task is already resolved; reopen it before resolving again: {task_key}")
-        connection.execute(
+        cursor = connection.execute(
             """
             UPDATE sales_tasks
             SET status = 'RESOLVED', resolution_note = ?, updated_at = ?
-            WHERE task_key = ?
+            WHERE task_key = ? AND status != 'RESOLVED'
             """,
             (note, _now(), task_key),
         )
+        if cursor.rowcount != 1:
+            current = _fetch_task(connection, task_key)
+            if current.status == "RESOLVED":
+                raise ValueError(
+                    f"task is already resolved; reopen it before resolving again: {task_key}"
+                )
+            raise ValueError(f"task could not be resolved from status {current.status}: {task_key}")
         connection.commit()
         return _fetch_task(connection, task_key)
 
@@ -195,6 +199,7 @@ def reopen_sales_task(database: str | Path, task_key: str, reason: str) -> Sales
         raise ValueError("reopen reason cannot be empty")
 
     with _connect_existing(database) as connection:
+        connection.execute("BEGIN IMMEDIATE")
         current = _fetch_task(connection, task_key)
         if current.status != "RESOLVED":
             raise ValueError(f"only resolved tasks can be reopened: {task_key}")
@@ -213,7 +218,7 @@ def reopen_sales_task(database: str | Path, task_key: str, reason: str) -> Sales
             """
             UPDATE sales_tasks
             SET status = 'OPEN', resolution_note = '', updated_at = ?
-            WHERE task_key = ?
+            WHERE task_key = ? AND status = 'RESOLVED'
             """,
             (now, task_key),
         )
