@@ -22,6 +22,8 @@ Bu işlem:
 
 Açık veya devam eden bir görevi yeniden açma girişimi kontrollü hata üretir. Yeniden açma gerekçesi boş bırakılamaz.
 
+Bir görev zaten `RESOLVED` durumundaysa `resolve` komutu ikinci kez çalıştırılamaz. Bu koruma mevcut `resolution_note` değerinin sessizce ezilmesini engeller. Çözüm gerçekten değişecekse önce `reopen --reason ...` ile yeni çalışma döngüsü açılmalı, ardından görev tekrar çözümlenmelidir; böylece eski çözüm denetim geçmişinde korunur.
+
 Mevcut SQLite veritabanlarında eski `sales_task_events` tablosu varsa yeni yapısal alanlar uygulama açılışında güvenli biçimde eklenir. Var olan denetim satırları silinmez veya yeniden yazılmaz; eski kayıtların yeni alanları boş kalır.
 
 ## Denetim geçmişini görüntüleme ve dışa aktarma
