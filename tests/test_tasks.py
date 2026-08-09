@@ -75,6 +75,23 @@ class SalesTaskTests(unittest.TestCase):
                 count = connection.execute("SELECT COUNT(*) FROM sales_tasks").fetchone()[0]
             self.assertEqual(count, 2)
 
+    def test_resolve_rejects_overwriting_existing_resolution(self) -> None:
+        action = SalesAction("B2B-001", 1, "win_back", "Ara", "Skor düştü")
+        with tempfile.TemporaryDirectory() as directory:
+            database = Path(directory) / "sales.db"
+            sync_sales_tasks(database, [action])
+            resolve_sales_task(database, "B2B-001:win_back", "İlk çözüm notu")
+
+            with self.assertRaisesRegex(ValueError, "already resolved"):
+                resolve_sales_task(database, "B2B-001:win_back", "Yanlışlıkla ezilen yeni not")
+
+            with sqlite3.connect(database) as connection:
+                row = connection.execute(
+                    "SELECT status, resolution_note FROM sales_tasks WHERE task_key = ?",
+                    ("B2B-001:win_back",),
+                ).fetchone()
+            self.assertEqual(row, ("RESOLVED", "İlk çözüm notu"))
+
     def test_reopen_preserves_previous_resolution_in_structured_audit_event(self) -> None:
         action = SalesAction("B2B-001", 1, "win_back", "Ara", "Skor düştü")
         with tempfile.TemporaryDirectory() as directory:
