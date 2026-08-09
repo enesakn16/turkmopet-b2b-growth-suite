@@ -172,12 +172,21 @@ def resolve_sales_task(database: str | Path, task_key: str, resolution_note: str
     note = resolution_note.strip()
     if not note:
         raise ValueError("resolution note cannot be empty")
-    return _update_task(
-        database,
-        task_key,
-        "status = 'RESOLVED', resolution_note = ?, updated_at = ?",
-        (note, _now()),
-    )
+
+    with _connect_existing(database) as connection:
+        current = _fetch_task(connection, task_key)
+        if current.status == "RESOLVED":
+            raise ValueError(f"task is already resolved; reopen it before resolving again: {task_key}")
+        connection.execute(
+            """
+            UPDATE sales_tasks
+            SET status = 'RESOLVED', resolution_note = ?, updated_at = ?
+            WHERE task_key = ?
+            """,
+            (note, _now(), task_key),
+        )
+        connection.commit()
+        return _fetch_task(connection, task_key)
 
 
 def reopen_sales_task(database: str | Path, task_key: str, reason: str) -> SalesTask:
