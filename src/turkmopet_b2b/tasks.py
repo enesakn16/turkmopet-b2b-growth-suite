@@ -157,13 +157,21 @@ def assign_sales_task(database: str | Path, task_key: str, assignee: str) -> Sal
 
 def start_sales_task(database: str | Path, task_key: str) -> SalesTask:
     with _connect_existing(database) as connection:
-        current = _fetch_task(connection, task_key)
-        if current.status == "RESOLVED":
-            raise ValueError(f"resolved task cannot be started: {task_key}")
-        connection.execute(
-            "UPDATE sales_tasks SET status = 'IN_PROGRESS', updated_at = ? WHERE task_key = ?",
+        cursor = connection.execute(
+            """
+            UPDATE sales_tasks
+            SET status = 'IN_PROGRESS', updated_at = ?
+            WHERE task_key = ? AND status = 'OPEN'
+            """,
             (_now(), task_key),
         )
+        if cursor.rowcount != 1:
+            current = _fetch_task(connection, task_key)
+            if current.status == "RESOLVED":
+                raise ValueError(f"resolved task cannot be started: {task_key}")
+            raise ValueError(
+                f"task can only be started from OPEN status; current status is {current.status}: {task_key}"
+            )
         connection.commit()
         return _fetch_task(connection, task_key)
 
