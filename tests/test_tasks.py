@@ -4,7 +4,12 @@ import unittest
 from pathlib import Path
 
 from turkmopet_b2b.actions import SalesAction
-from turkmopet_b2b.tasks import sync_sales_tasks
+from turkmopet_b2b.tasks import (
+    list_task_events,
+    reopen_sales_task,
+    resolve_sales_task,
+    sync_sales_tasks,
+)
 
 
 class SalesTaskTests(unittest.TestCase):
@@ -69,6 +74,98 @@ class SalesTaskTests(unittest.TestCase):
             with sqlite3.connect(database) as connection:
                 count = connection.execute("SELECT COUNT(*) FROM sales_tasks").fetchone()[0]
             self.assertEqual(count, 2)
+
+    def test_resolve_rejects_overwriting_existing_resolution(self) -> None:
+        action = SalesAction("B2B-001", 1, "win_back", "Ara", "Skor düştü")
+        with tempfile.TemporaryDirectory() as directory:
+            database = Path(directory) / "sales.db"
+            sync_sales_tasks(database, [action])
+            resolve_sales_task(database, "B2B-001:win_back", "İlk çözüm notu")
+
+            with self.assertRaisesRegex(ValueError, "already resolved"):
+                resolve_sales_task(database, "B2B-001:win_back", "Yanlışlıkla ezilen yeni not")
+
+            with sqlite3.connect(database) as connection:
+                row = connection.execute(
+                    "SELECT status, resolution_note FROM sales_tasks WHERE task_key = ?",
+                    ("B2B-001:win_back",),
+                ).fetchone()
+            self.assertEqual(row, ("RESOLVED", "İlk çözüm notu"))
+
+    def test_reopen_preserves_previous_resolution_in_structured_audit_event(self) -> None:
+        action = SalesAction("B2B-001", 1, "win_back", "Ara", "Skor düştü")
+        with tempfile.TemporaryDirectory() as directory:
+            database = Path(directory) / "sales.db"
+            sync_sales_tasks(database, [action])
+            resolve_sales_task(database, "B2B-001:win_back", "Müşteri ödeme sözü verdi")
+
+            reopened = reopen_sales_task(
+                database,
+                "B2B-001:win_back",
+                "Yeni dönemde skor tekrar düştü",
+            )
+
+            self.assertEqual(reopened.status, "OPEN")
+            self.assertEqual(reopened.resolution_note, "")
+            events = list_task_events(database, "B2B-001:win_back")
+            self.assertEqual(len(events), 1)
+            self.assertEqual(events[0].event_type, "REOPENED")
+            self.assertEqual(events[0].previous_resolution, "Müşteri ödeme sözü verdi")
+            self.assertEqual(events[0].reopen_reason, "Yeni dönemde skor tekrar düştü")
+            self.assertIn(events[0].previous_resolution, events[0].note)
+            self.assertIn(events[0].reopen_reason, events[0].note)
+
+    def test_existing_event_table_is_migrated_without_losing_rows(self) -> None:
+        action = SalesAction("B2B-001", 1, "win_back", "Ara", "Skor düştü")
+        with tempfile.TemporaryDirectory() as directory:
+            database = Path(directory) / "sales.db"
+            sync_sales_tasks(database, [action])
+            with sqlite3.connect(database) as connection:
+                connection.execute("DROP TABLE sales_task_events")
+                connection.execute(
+                    """
+                    CREATE TABLE sales_task_events (
+                        event_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        task_key TEXT NOT NULL,
+                        event_type TEXT NOT NULL,
+                        note TEXT NOT NULL,
+                        created_at TEXT NOT NULL
+                    )
+                    """
+                )
+                connection.execute(
+                    """
+                    INSERT INTO sales_task_events (task_key, event_type, note, created_at)
+                    VALUES ('B2B-001:win_back', 'REOPENED', 'legacy event', '2026-08-01T00:00:00+00:00')
+                    """
+                )
+                connection.commit()
+
+            events = list_task_events(database, "B2B-001:win_back")
+
+            self.assertEqual(len(events), 1)
+            self.assertEqual(events[0].note, "legacy event")
+            self.assertEqual(events[0].previous_resolution, "")
+            self.assertEqual(events[0].reopen_reason, "")
+
+    def test_reopen_rejects_non_resolved_task(self) -> None:
+        action = SalesAction("B2B-001", 1, "win_back", "Ara", "Skor düştü")
+        with tempfile.TemporaryDirectory() as directory:
+            database = Path(directory) / "sales.db"
+            sync_sales_tasks(database, [action])
+
+            with self.assertRaisesRegex(ValueError, "only resolved tasks can be reopened"):
+                reopen_sales_task(database, "B2B-001:win_back", "Yanlışlıkla")
+
+    def test_reopen_requires_reason(self) -> None:
+        action = SalesAction("B2B-001", 1, "win_back", "Ara", "Skor düştü")
+        with tempfile.TemporaryDirectory() as directory:
+            database = Path(directory) / "sales.db"
+            sync_sales_tasks(database, [action])
+            resolve_sales_task(database, "B2B-001:win_back", "Tamamlandı")
+
+            with self.assertRaisesRegex(ValueError, "reopen reason cannot be empty"):
+                reopen_sales_task(database, "B2B-001:win_back", "   ")
 
 
 if __name__ == "__main__":

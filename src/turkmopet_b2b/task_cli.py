@@ -9,6 +9,8 @@ from .tasks import (
     TASK_STATUSES,
     assign_sales_task,
     list_sales_tasks,
+    list_task_events,
+    reopen_sales_task,
     resolve_sales_task,
     start_sales_task,
 )
@@ -24,6 +26,13 @@ def build_parser() -> argparse.ArgumentParser:
     list_parser.add_argument("--assignee")
     list_parser.add_argument("--output", type=Path, help="Optional Excel-compatible CSV output")
 
+    audit_parser = subparsers.add_parser(
+        "audit",
+        help="Show the structured audit history for one sales task",
+    )
+    audit_parser.add_argument("task_key")
+    audit_parser.add_argument("--output", type=Path, help="Optional Excel-compatible CSV output")
+
     assign_parser = subparsers.add_parser("assign", help="Assign a task")
     assign_parser.add_argument("task_key")
     assign_parser.add_argument("assignee")
@@ -34,6 +43,13 @@ def build_parser() -> argparse.ArgumentParser:
     resolve_parser = subparsers.add_parser("resolve", help="Resolve a task with a mandatory note")
     resolve_parser.add_argument("task_key")
     resolve_parser.add_argument("--note", required=True)
+
+    reopen_parser = subparsers.add_parser(
+        "reopen",
+        help="Reopen a resolved task while preserving its previous resolution in the audit log",
+    )
+    reopen_parser.add_argument("task_key")
+    reopen_parser.add_argument("--reason", required=True)
     return parser
 
 
@@ -49,6 +65,15 @@ def main(argv: list[str] | None = None) -> int:
                 _print_tasks(tasks)
             return 0
 
+        if args.command == "audit":
+            events = list_task_events(args.database, args.task_key)
+            if args.output is not None:
+                _write_events(args.output, events)
+                print(f"wrote {len(events)} task events -> {args.output}")
+            else:
+                _print_events(events)
+            return 0
+
         if args.command == "assign":
             task = assign_sales_task(args.database, args.task_key, args.assignee)
             print(f"assigned {task.task_key} -> {task.assignee}")
@@ -59,8 +84,13 @@ def main(argv: list[str] | None = None) -> int:
             print(f"started {task.task_key}")
             return 0
 
-        task = resolve_sales_task(args.database, args.task_key, args.note)
-        print(f"resolved {task.task_key}")
+        if args.command == "resolve":
+            task = resolve_sales_task(args.database, args.task_key, args.note)
+            print(f"resolved {task.task_key}")
+            return 0
+
+        task = reopen_sales_task(args.database, args.task_key, args.reason)
+        print(f"reopened {task.task_key}")
         return 0
     except (OSError, ValueError) as exc:
         print(f"error: {exc}", file=sys.stderr)
@@ -76,6 +106,18 @@ def _print_tasks(tasks: list[object]) -> None:
         print(
             f"P{task.priority} {task.status:<11} {task.task_key} "
             f"[{assignee}] {task.recommended_action}"
+        )
+
+
+def _print_events(events: list[object]) -> None:
+    if not events:
+        print("no task events found")
+        return
+    for event in events:
+        print(
+            f"{event.created_at} {event.event_type} {event.task_key} "
+            f"previous_resolution={event.previous_resolution!r} "
+            f"reopen_reason={event.reopen_reason!r}"
         )
 
 
@@ -99,6 +141,24 @@ def _write_tasks(path: Path, tasks: list[object]) -> None:
         writer.writeheader()
         for task in tasks:
             writer.writerow({field: getattr(task, field) for field in fields})
+
+
+def _write_events(path: Path, events: list[object]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fields = [
+        "event_id",
+        "task_key",
+        "event_type",
+        "note",
+        "previous_resolution",
+        "reopen_reason",
+        "created_at",
+    ]
+    with path.open("w", encoding="utf-8-sig", newline="") as handle:
+        writer = csv.DictWriter(handle, fieldnames=fields)
+        writer.writeheader()
+        for event in events:
+            writer.writerow({field: getattr(event, field) for field in fields})
 
 
 if __name__ == "__main__":
